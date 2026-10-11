@@ -95,6 +95,15 @@ The integration also exposes `ino_a9.set_intrusion_schedule` for a targeted
 camera device. Keep the camera's Internet-deny rule in place; the app only
 needs local access to TCP port 20190 on each camera.
 
+Each device also has a **Connection diagnostics** sensor. It stays readable when
+the camera disconnects and exposes the current error plus the ten most recent
+observed errors in its `error_log` attribute. Repeated identical failures are
+coalesced until recovery; history is restored across Home Assistant restarts.
+History begins when the sensor is installed, and errors occurring between polls
+may not be observed. Diagnostic messages are bounded and credential-bearing
+messages are omitted. This uses the existing shared poller and opens no new
+camera sessions.
+
 The app currently builds from source during installation. The app and integration
 use independent release channels. App images are
 published from `app-v<version>` tags, while HACS tracks only published GitHub
