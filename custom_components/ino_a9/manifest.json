@@ -3,10 +3,10 @@
   "name": "INO-A9 Local Bridge",
   "codeowners": ["@IvanFogel"],
   "config_flow": true,
-  "documentation": "https://github.com/chiconws/ino-a9-local-bridge",
+  "documentation": "https://github.com/IvanFogel/ino-a9-local-bridge",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/chiconws/ino-a9-local-bridge/issues",
+  "issue_tracker": "https://github.com/IvanFogel/ino-a9-local-bridge/issues",
   "requirements": [],
   "single_config_entry": true,
   "version": "0.1.0"

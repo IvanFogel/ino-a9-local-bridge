@@ -48,12 +48,15 @@ jobs:
 
       - name: Normalize image name
         id: normalize
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           echo "image_name=ino-a9-local-bridge" >> "$GITHUB_OUTPUT"
-          echo "registry_prefix=ghcr.io/chiconws" >> "$GITHUB_OUTPUT"
+          echo "registry_prefix=ghcr.io/${REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
           echo "name=INO-A9 Local Bridge" >> "$GITHUB_OUTPUT"
           echo "description=Local INO-A9 camera bridge with audio-capable RTSP streams" >> "$GITHUB_OUTPUT"
-          echo "url=https://github.com/chiconws/ino-a9-local-bridge" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${REPOSITORY}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare architecture matrix
         id: matrix

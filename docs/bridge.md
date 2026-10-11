@@ -29,10 +29,12 @@ state, sorted weekdays (Monday `0` through Sunday `6`), and a non-crossing
 minute-precision time interval. Keep the camera Internet block in place; the
 app needs only local TCP access to camera port `20190`.
 
-For a published app version, add this repository URL under **Settings → Add-ons
+To install the app, add this repository URL under **Settings → Add-ons
 → Add-on store → ⋮ → Repositories**, install `INO-A9 Local Bridge`, and configure
-the app there. The app release channel uses tags named `app-v<version>`; the
-workflow publishes the matching `amd64` and `aarch64` images to GHCR.
+the app there. The app currently builds from source during installation, until
+the first upstream app image is published and enabled in the app manifest. The
+app release channel uses tags named `app-v<version>`; the workflow publishes the
+matching `amd64` and `aarch64` images to the repository owner's GHCR namespace.
 
 Install the `INO-A9 Local Bridge` integration from HACS by adding this repository
 as a custom integration repository, or copy `custom_components/ino_a9/` into the

@@ -36,4 +36,4 @@ LABEL \
     io.hass.type="app" \
     io.hass.arch="${BUILD_ARCH}" \
     org.opencontainers.image.title="INO-A9 Local Bridge" \
-    org.opencontainers.image.source="https://github.com/chiconws/ino-a9-local-bridge"
+    org.opencontainers.image.source="https://github.com/IvanFogel/ino-a9-local-bridge"
