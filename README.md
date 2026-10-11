@@ -42,9 +42,10 @@ publication decisions.
   at 10 FPS
 - The microphone is live-validated: command `2614` starts an unencrypted local
   G.711 A-law stream at 8 kHz, reported as 16-bit mono by the camera
-- The tested firmware repeatedly stops its video channel while microphone data
-  continues on the same live socket; the client treats two seconds without a
-  complete frame as a dead video stream and reconnects
+- The bridge maintains the bidirectional command-107 keepalive every 500 ms and
+  acknowledges the latest received AV sequence, which keeps the camera's media
+  send window advancing; a separate two-second complete-frame watchdog remains
+  as a recovery fallback
 - The HTTP bridge exposes snapshots, full-rate and one-frame-per-second MJPEG,
   and raw G.711 A-law microphone audio; the setup laptop and Linklemo are not
   needed at runtime
@@ -65,12 +66,39 @@ publication decisions.
 - [`docs/bridge.md`](docs/bridge.md) — deployment and Home Assistant setup
 - [`docs/protocol.md`](docs/protocol.md) — PPRPC framing and SDK findings
 - [`go2rtc.example.yaml`](go2rtc.example.yaml) — audio-capable RTSP restreams
-- `src/wificam_bridge/` — clean-room parser, camera client, and HTTP bridge
+- [`ino_a9_bridge/`](ino_a9_bridge/) — Home Assistant app build context and the
+  single clean-room parser, camera client, and HTTP bridge implementation
+- [`custom_components/ino_a9/`](custom_components/ino_a9/) — HACS-ready Home
+  Assistant integration discovered from the app
+- [`hacs.json`](hacs.json) — HACS repository metadata
 - `scripts/probe_media.py` — header-only live media-format diagnostic
-- `tests/` — tests using synthetic packets and frames only
+- `ino_a9_bridge/tests/` — tests using synthetic packets and frames only
 
 No APKs, firmware dumps, packet captures, Wi-Fi keys, account passwords, app
 secrets, cookies, or camera video are stored here.
+
+## Home Assistant app and integration
+
+The repository contains both sides of the local deployment:
+
+1. Install the `INO-A9 Local Bridge` app from this repository's app catalog and
+   configure one `cameras` item per physical camera. Credentials stay in the
+   app's Supervisor-managed options and its private `/data` files.
+2. Install the `INO-A9 Local Bridge` integration through HACS, or copy
+   `custom_components/ino_a9` into the Home Assistant configuration directory.
+3. The app publishes Supervisor discovery. Home Assistant creates one config
+   entry and one device per configured camera, with a native camera entity,
+   audio-capable RTSP stream, LED and intrusion switches, control selects, and
+   a reboot button.
+
+The integration also exposes `ino_a9.set_intrusion_schedule` for a targeted
+camera device. Keep the camera's Internet-deny rule in place; the app only
+needs local access to TCP port 20190 on each camera.
+
+The app currently builds from source during installation. The app and integration
+use independent release channels. App images are
+published from `app-v<version>` tags, while HACS tracks only published GitHub
+Releases named `v<version>` for the integration.
 
 ## Development
 

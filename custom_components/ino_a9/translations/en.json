@@ -1,0 +1,25 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This INO-A9 app is already configured.",
+      "cannot_connect": "Unable to connect to the INO-A9 app.",
+      "invalid_discovery": "The Supervisor discovery payload is invalid."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "host": "Host",
+          "http_port": "HTTP port",
+          "rtsp_port": "RTSP port",
+          "token": "App token"
+        },
+        "description": "Enter the INO-A9 app connection details.",
+        "title": "INO-A9 Local Bridge"
+      },
+      "hassio": {
+        "description": "The INO-A9 app was discovered.",
+        "title": "INO-A9 Local Bridge"
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+# https://developers.home-assistant.io/docs/apps/configuration#app-configuration
+name: INO-A9 Local Bridge
+version: "0.4.2"
+slug: ino_a9_bridge
+description: Local INO-A9 camera bridge with audio-capable RTSP streams
+url: "https://github.com/IvanFogel/ino-a9-local-bridge/tree/main/ino_a9_bridge"
+# Build from source until the first app image is published in the upstream registry.
+arch:
+  - amd64
+  - aarch64
+homeassistant: "2026.6.0"
+init: false
+startup: application
+discovery:
+  - ino_a9
+ports:
+  "8554/tcp": 8554
+ports_description:
+  "8554/tcp": RTSP camera stream
+options:
+  log_level: info
+  cameras: []
+schema:
+  log_level: "list(debug|info|warning|error)"
+  cameras:
+    - name: "match(^[A-Za-z0-9_-]+$)"
+      host: "str(1,)"
+      port: port
+      bootstrap_prefix: password
+      user: password
+      lan_password: password

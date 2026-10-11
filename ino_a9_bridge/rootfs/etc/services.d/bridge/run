@@ -1,0 +1,6 @@
+#!/command/with-contenv bash
+set -euo pipefail
+
+log_level="$(python3 -c 'import json; print(json.load(open("/data/options.json", encoding="utf-8")).get("log_level", "info"))')"
+exec python3 -m wificam_bridge.bridge --config /data/bridge.json --log-level "${log_level}" \
+  --control-token /data/control_token --control-state /data/control_state.json

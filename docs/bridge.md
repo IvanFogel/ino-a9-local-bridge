@@ -5,6 +5,50 @@ authentication, answers the initial time-sync exchange, starts MJPEG video,
 reassembles the network fragments, and decrypts only the encrypted head of each
 frame. Linklemo and the setup laptop are not needed while the bridge is running.
 
+## Home Assistant app deployment
+
+The supported Home Assistant deployment is the `INO-A9 Local Bridge` app under
+[`ino_a9_bridge/`](../ino_a9_bridge/), paired with the HACS-ready integration
+under [`custom_components/ino_a9/`](../custom_components/ino_a9/).
+
+Install the app from this repository's Home Assistant app repository and add
+one camera object per physical camera. The app keeps camera credentials in its
+Supervisor-managed options, generates the private bridge/go2rtc configuration,
+and publishes its internal HTTP/RTSP endpoints through Supervisor discovery.
+After the integration is installed, discovery creates one config entry and one
+device per camera. The native entities are:
+
+- camera with JPEG snapshots and an audio-capable RTSP source;
+- status-LED and intrusion-detection switches;
+- selects for night vision, image orientation, video quality, and motion
+  sensitivity;
+- a camera reboot button.
+
+The `ino_a9.set_intrusion_schedule` service accepts a device target, enabled
+state, sorted weekdays (Monday `0` through Sunday `6`), and a non-crossing
+minute-precision time interval. Keep the camera Internet block in place; the
+app needs only local TCP access to camera port `20190`.
+
+To install the app, add this repository URL under **Settings → Add-ons
+→ Add-on store → ⋮ → Repositories**, install `INO-A9 Local Bridge`, and configure
+the app there. The app currently builds from source during installation, until
+the first upstream app image is published and enabled in the app manifest. The
+app release channel uses tags named `app-v<version>`; the workflow publishes the
+matching `amd64` and `aarch64` images to the repository owner's GHCR namespace.
+
+Install the `INO-A9 Local Bridge` integration from HACS by adding this repository
+as a custom integration repository, or copy `custom_components/ino_a9/` into the
+Home Assistant `custom_components` directory. The integration release channel
+uses published GitHub Releases named `v<version>`, which are the releases HACS
+tracks. Do not publish an `app-v*` tag as a GitHub Release, because HACS would
+interpret it as a new integration version.
+For local app development, add the repository as a local app source and rebuild
+the app from that source:
+
+```bash
+ha apps rebuild local_ino_a9_bridge
+```
+
 ## Private configuration
 
 Copy `config.example.json` outside the repository and fill in the values
@@ -160,7 +204,8 @@ Point the card's `entity` at `camera.ino_a9_camera_1_preview` while leaving its
 tap action pointed at the audio-capable entity. The preview is a continuous
 MJPEG response capped at 1 FPS and uses about one tenth of the
 bridge-to-dashboard bandwidth of the tested 10 FPS stream. It does not prevent
-pauses originating in the camera firmware.
+pauses caused by a downstream viewer or change the camera-to-bridge protocol
+pacing; all viewers share the same acknowledged PPRPC session.
 
 Use the dedicated MJPEG integration rather than putting the multipart URL in
 Generic Camera's Stream Source field. Current Home Assistant releases can route
@@ -179,8 +224,8 @@ need a stream containing both compatible video and audio. The included
 - G.711 A-law is resampled and transcoded to mono Opus;
 - both producers start only while the RTSP stream has a consumer;
 - `-re` paces the headerless audio source, whose bytes carry no timestamps;
-- the FFmpeg producer timeout is 30 seconds so a firmware pause does not make
-  go2rtc discard the source before the bridge recovers it.
+- the FFmpeg producer timeout is 30 seconds so a temporary media gap does not
+  make go2rtc discard the source before the bridge recovers it.
 
 The syntax follows go2rtc's
 [FFmpeg source](https://github.com/AlexxIT/go2rtc/blob/master/internal/ffmpeg/README.md)
@@ -215,19 +260,20 @@ Assistant config flows passed stream validation.
 - One camera connection feeds any number of local HTTP viewers; opening more
   dashboard views does not create more PPRPC sessions.
 - The worker reconnects after camera power or Wi-Fi interruptions. It also
-  declares a session stale after two seconds without a complete frame, then
-  retries after one second. Existing HTTP viewers remain connected and receive
-  new frames when the camera session recovers.
-- The tested units normally emit roughly 10 frames per second at 640×480, but
-  their firmware repeatedly stops the video channel. A controlled trace showed
-  fresh microphone packets continuing on the same socket while video was
-  absent, which rules out a total Wi-Fi or PPRPC connection loss. The shorter
-  watchdog masks most of that firmware outage but cannot prevent the camera-side
-  stop itself.
-- A 90-second continuity test from the Home Assistant host received 498 frames
-  through one unchanged HTTP connection while several camera sessions
-  recovered. The largest inter-frame gap was 5.61 seconds; no viewer reconnect
-  or reload was required.
+  refreshes the session after two seconds without a complete video frame, then
+  retries after one second. Audio and other PPRPC packets keep the socket's
+  activity watchdog alive during a video pause, while the frame watchdog still
+  refreshes a stalled video channel. During a short reconnect, the API keeps
+  recent media available for 15 seconds so Home Assistant entities do not
+  flap; a connection with no recent activity is eventually reported as
+  unavailable.
+- The reader sends an encrypted command-107 keepalive every 500 ms and includes
+  the latest AV sequence in protobuf field 4. That acknowledgement is required
+  to keep the camera's media send window advancing; the two-second complete-frame
+  watchdog remains the fallback if a session genuinely stalls.
+- On 2026-09-04, the HAOS test app delivered 219 complete JPEGs in 45.7 seconds
+  through one unchanged HTTP connection. The largest inter-frame gap was 0.593
+  seconds, with no gap above two seconds and no probe errors.
 - A video-only 30-second observation measured about 0.64 Mbit/s of MJPEG
   payload. Allow roughly 0.8–1.0 Mbit/s per active camera for video plus local
   protocol/TCP/Wi-Fi overhead; MJPEG varies with scene complexity.

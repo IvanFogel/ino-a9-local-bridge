@@ -7,7 +7,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md NOTICE SECURITY.md ./
-COPY src ./src
+COPY ino_a9_bridge/src ./ino_a9_bridge/src
 
 RUN python -m pip install --no-cache-dir .
 

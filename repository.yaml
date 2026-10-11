@@ -1,0 +1,4 @@
+# https://developers.home-assistant.io/docs/apps/repository#repository-configuration
+name: INO-A9 local bridge apps
+url: "https://github.com/IvanFogel/ino-a9-local-bridge"
+maintainer: INO-A9 local bridge maintainers

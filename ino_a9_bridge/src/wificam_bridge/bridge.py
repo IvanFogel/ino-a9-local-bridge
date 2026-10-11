@@ -17,6 +17,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .camera import CameraClient, CameraCredentials
+from .control_api import ControlAPI, ControlStateStore
+from .session import CameraSession, CameraUnavailable
 
 
 LOGGER = logging.getLogger("wificam_bridge")
@@ -24,6 +26,7 @@ BOUNDARY = "ino-a9-frame"
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 PREVIEW_INTERVAL_SECONDS = 1.0
 RECONNECT_DELAY_SECONDS = 1.0
+RECENT_ACTIVITY_GRACE_SECONDS = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +48,11 @@ def load_config(path: str | Path) -> BridgeSettings:
     """Load a private JSON configuration file."""
     config_path = Path(path)
     raw = json.loads(config_path.read_text(encoding="utf-8"))
+    return parse_config(raw)
+
+
+def parse_config(raw: object) -> BridgeSettings:
+    """Validate a decoded bridge configuration object."""
     if not isinstance(raw, dict):
         raise ValueError("bridge config must be a JSON object")
     camera_values = raw.get("cameras")
@@ -149,8 +157,18 @@ class CameraState:
 
     def status(self) -> dict[str, Any]:
         with self.condition:
+            activity_times = [
+                timestamp
+                for timestamp in (self.last_frame_at, self.last_audio_at)
+                if timestamp is not None
+            ]
+            last_activity_at = max(activity_times, default=None)
+            recently_active = (
+                last_activity_at is not None
+                and time.time() - last_activity_at <= RECENT_ACTIVITY_GRACE_SECONDS
+            )
             return {
-                "connected": self.connected,
+                "connected": self.connected or recently_active,
                 "has_frame": self.frame is not None,
                 "has_audio": bool(self.audio_chunks),
                 "last_frame_at": self.last_frame_at,
@@ -170,31 +188,69 @@ class CameraWorker(threading.Thread):
         self.settings = settings
         self.state = state
         self.stop_event = stop_event
+        self._session_lock = threading.Lock()
+        self._session: CameraSession | None = None
 
     def run(self) -> None:
-        while not self.stop_event.is_set():
-            client = CameraClient(
-                self.settings.host,
-                self.settings.credentials,
-                port=self.settings.port,
-            )
-            try:
-                LOGGER.info("connecting camera %s at %s", self.settings.name, self.settings.host)
-                client.connect()
-                client.start_audio()
-                self.state.set_connected(True)
-                LOGGER.info("camera %s stream started", self.settings.name)
-                for frame in client.frames(audio_callback=self.state.publish_audio):
-                    self.state.publish(frame)
-                    if self.stop_event.is_set():
-                        break
-            except Exception as error:
-                message = f"{type(error).__name__}: {error}"
-                self.state.set_connected(False, message)
-                LOGGER.warning("camera %s disconnected: %s", self.settings.name, message)
-            finally:
-                client.close()
-            self.stop_event.wait(RECONNECT_DELAY_SECONDS)
+        client = CameraClient(
+            self.settings.host,
+            self.settings.credentials,
+            port=self.settings.port,
+        )
+        session = client.open_session()
+        with self._session_lock:
+            self._session = session
+        session.start(on_frame=self.state.publish, on_audio=self.state.publish_audio)
+        try:
+            while not self.stop_event.is_set():
+                error = session.error
+                if session.connected:
+                    self.state.set_connected(True)
+                else:
+                    message = None if error is None else f"{type(error).__name__}: {error}"
+                    self.state.set_connected(False, message)
+                self.stop_event.wait(0.1)
+        finally:
+            session.close()
+            with self._session_lock:
+                self._session = None
+
+    def status(self) -> dict[str, Any]:
+        return self.state.status()
+
+    def set_status_led(self, enabled: bool) -> None:
+        self._active_session().set_status_led(enabled)
+
+    def set_night_vision(self, value: str) -> None:
+        self._active_session().set_night_vision(value)
+
+    def get_night_vision(self) -> str:
+        return self._active_session().get_night_vision()
+
+    def set_flip(self, value: str) -> None:
+        self._active_session().set_flip(value)
+
+    def get_flip(self) -> str:
+        return self._active_session().get_flip()
+
+    def set_video_quality(self, value: str) -> None:
+        self._active_session().set_video_quality(value)
+
+    def set_motion(self, value: str) -> None:
+        self._active_session().set_motion(value)
+
+    def set_intrusion(self, enabled: bool, schedule) -> None:
+        self._active_session().set_intrusion(enabled, schedule)
+
+    def reboot(self) -> None:
+        self._active_session().reboot()
+
+    def _active_session(self) -> CameraSession:
+        with self._session_lock:
+            session = self._session
+        if session is None:
+            raise CameraUnavailable("camera worker is stopped")
+        return session
 
 
 class BridgeHTTPServer(ThreadingHTTPServer):
@@ -204,9 +260,19 @@ class BridgeHTTPServer(ThreadingHTTPServer):
         self,
         address: tuple[str, int],
         states: dict[str, CameraState],
+        *,
+        controls: dict[str, object] | None = None,
+        control_token: str | Path | None = None,
+        control_state: ControlStateStore | None = None,
     ) -> None:
         super().__init__(address, BridgeHandler)
         self.states = states
+        if controls is None and control_token is None and control_state is None:
+            self.control_api: ControlAPI | None = None
+        elif controls is None or control_token is None or control_state is None:
+            raise ValueError("controls, control_token, and control_state must be provided together")
+        else:
+            self.control_api = ControlAPI(controls, control_token, control_state)
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -216,6 +282,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
         path = urlsplit(self.path).path
+        if getattr(self.server, "control_api", None) is not None and (
+            path == "/health" or path.startswith("/api/")
+        ):
+            self._api()
+            return
         if path in ("/", "/health"):
             self._health()
             return
@@ -234,6 +305,31 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self._audio(state)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_PUT(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        self._api()
+
+    def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        self._api()
+
+    def _api(self) -> None:
+        api = self.server.control_api
+        if api is None:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        length = self.headers.get("Content-Length", "0")
+        try:
+            raw_body = self.rfile.read(int(length))
+        except ValueError:
+            raw_body = b""
+        result = api.handle(self.command, urlsplit(self.path).path, self.headers, raw_body)
+        body = json.dumps(result.body, separators=(",", ":")).encode("utf-8")
+        self.send_response(result.status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _health(self) -> None:
         body = json.dumps(
@@ -329,6 +425,14 @@ def _port(value: object, label: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Expose INO-A9 cameras as local MJPEG")
     parser.add_argument("--config", required=True, help="private bridge JSON configuration")
+    parser.add_argument("--control-token", help="private API bearer token file")
+    parser.add_argument("--control-state", help="non-secret persistent control state file")
+    parser.add_argument(
+        "--log-level",
+        choices=("debug", "info", "warning", "error"),
+        default="info",
+        help="bridge log level",
+    )
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
     return parser
 
@@ -336,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else args.log_level.upper(),
         format="%(asctime)s %(levelname)s %(message)s",
     )
     settings = load_config(args.config)
@@ -348,7 +452,18 @@ def main(argv: list[str] | None = None) -> int:
     ]
     for worker in workers:
         worker.start()
-    server = BridgeHTTPServer((settings.listen_host, settings.listen_port), states)
+    control_state = None
+    if (args.control_token is None) != (args.control_state is None):
+        parser.error("--control-token and --control-state must be used together")
+    if args.control_token is not None and args.control_state is not None:
+        control_state = ControlStateStore(args.control_state, list(states))
+    server = BridgeHTTPServer(
+        (settings.listen_host, settings.listen_port),
+        states,
+        controls={worker.settings.name: worker for worker in workers} if control_state else None,
+        control_token=args.control_token,
+        control_state=control_state,
+    )
     LOGGER.info("HTTP bridge listening on %s:%d", settings.listen_host, settings.listen_port)
     try:
         server.serve_forever(poll_interval=0.5)

@@ -1,0 +1,51 @@
+name: Build Home Assistant app
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Read app version
+        id: app_metadata
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version: *"\([^"]*\)"/\1/p' ino_a9_bridge/config.yaml)"
+          test -n "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ino_a9_bridge
+          file: ./ino_a9_bridge/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          tags: local/ino-a9-local-bridge:${{ github.sha }}-${{ matrix.arch }}
+          build-args: |
+            BUILD_VERSION=${{ steps.app_metadata.outputs.version }}
+            BUILD_ARCH=${{ matrix.arch }}

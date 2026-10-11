@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title>INO-A9 Local Bridge</title>
+  <rect width="256" height="256" rx="52" fill="#17212b"/>
+  <path d="M47 103h162v91H47z" fill="#243746" stroke="#8fd3e8" stroke-width="8"/>
+  <path d="M72 103l14-25h84l14 25" fill="none" stroke="#8fd3e8" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="128" cy="147" r="31" fill="#17212b" stroke="#ff9f68" stroke-width="10"/>
+  <circle cx="128" cy="147" r="11" fill="#ff9f68"/>
+  <path d="M72 55v-14M92 55v-14M112 55v-14M132 55v-14M152 55v-14M172 55v-14" stroke="#ff9f68" stroke-width="7" stroke-linecap="round"/>
+  <path d="M70 216h116" stroke="#8fd3e8" stroke-width="8" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,2 @@
+# Pinned for a reproducible app image; the standalone package pins the same runtime dependency.
+cryptography==50.0.1

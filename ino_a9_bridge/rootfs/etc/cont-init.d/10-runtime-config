@@ -1,0 +1,4 @@
+#!/command/with-contenv bash
+set -euo pipefail
+
+exec python3 -m wificam_bridge.app_runtime --options /data/options.json --data-dir /data

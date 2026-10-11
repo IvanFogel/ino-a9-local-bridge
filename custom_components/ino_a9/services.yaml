@@ -1,0 +1,49 @@
+set_intrusion_schedule:
+  name: Set intrusion schedule
+  description: Set the enabled state and weekly schedule of one INO-A9 camera.
+  fields:
+    device_id:
+      name: Camera
+      description: INO-A9 camera device to configure.
+      required: true
+      selector:
+        device:
+          integration: ino_a9
+    enabled:
+      name: Enabled
+      description: Enable or disable intrusion detection.
+      required: true
+      selector:
+        boolean:
+    weekdays:
+      name: Weekdays
+      description: Sorted weekday numbers, where Monday is 0 and Sunday is 6.
+      required: true
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Monday
+              value: "0"
+            - label: Tuesday
+              value: "1"
+            - label: Wednesday
+              value: "2"
+            - label: Thursday
+              value: "3"
+            - label: Friday
+              value: "4"
+            - label: Saturday
+              value: "5"
+            - label: Sunday
+              value: "6"
+    start_time:
+      name: Start time
+      required: true
+      selector:
+        time:
+    end_time:
+      name: End time
+      required: true
+      selector:
+        time:

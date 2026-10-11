@@ -1,0 +1,121 @@
+name: Publish Home Assistant app
+
+on:
+  push:
+    tags:
+      - "app-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare release build
+    runs-on: ubuntu-latest
+    outputs:
+      architectures: ${{ steps.info.outputs.architectures }}
+      build_matrix: ${{ steps.matrix.outputs.matrix }}
+      image_name: ${{ steps.normalize.outputs.image_name }}
+      registry_prefix: ${{ steps.normalize.outputs.registry_prefix }}
+      version: ${{ steps.validate_tag.outputs.version }}
+      name: ${{ steps.normalize.outputs.name }}
+      description: ${{ steps.normalize.outputs.description }}
+      url: ${{ steps.normalize.outputs.url }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Read app metadata
+        id: info
+        uses: home-assistant/actions/helpers/info@master
+        with:
+          path: ./ino_a9_bridge
+
+      - name: Validate app release tag
+        id: validate_tag
+        env:
+          APP_VERSION: ${{ steps.info.outputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          app_version="${APP_VERSION#\"}"
+          app_version="${app_version%\"}"
+          expected_tag="app-v${app_version}"
+          if [ "${TAG_NAME}" != "${expected_tag}" ]; then
+            echo "::error::tag '${TAG_NAME}' does not match app version '${app_version}' (expected '${expected_tag}')"
+            exit 1
+          fi
+          echo "version=${app_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize image name
+        id: normalize
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "image_name=ino-a9-local-bridge" >> "$GITHUB_OUTPUT"
+          echo "registry_prefix=ghcr.io/${REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "name=INO-A9 Local Bridge" >> "$GITHUB_OUTPUT"
+          echo "description=Local INO-A9 camera bridge with audio-capable RTSP streams" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${REPOSITORY}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare architecture matrix
+        id: matrix
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@2026.06.0
+        with:
+          architectures: ${{ steps.info.outputs.architectures }}
+          image-name: ${{ steps.normalize.outputs.image_name }}
+          registry-prefix: ${{ steps.normalize.outputs.registry_prefix }}
+
+  build:
+    name: Publish ${{ matrix.arch }} image
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build and publish architecture image
+        uses: home-assistant/builder/actions/build-image@2026.06.0
+        with:
+          arch: ${{ matrix.arch }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          context: ./ino_a9_bridge
+          image: ${{ matrix.image }}
+          image-tags: |
+            ${{ needs.prepare.outputs.version }}
+            latest
+          labels: |
+            io.hass.type=app
+            io.hass.name=${{ needs.prepare.outputs.name }}
+            io.hass.description=${{ needs.prepare.outputs.description }}
+            ${{ needs.prepare.outputs.url && format('io.hass.url={0}', needs.prepare.outputs.url) || '' }}
+          push: true
+          version: ${{ needs.prepare.outputs.version }}
+
+  manifest:
+    name: Publish multi-architecture manifest
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Publish multi-architecture manifest
+        uses: home-assistant/builder/actions/publish-multi-arch-manifest@2026.06.0
+        with:
+          architectures: ${{ needs.prepare.outputs.architectures }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image-name: ${{ needs.prepare.outputs.image_name }}
+          image-tags: |
+            ${{ needs.prepare.outputs.version }}
+            latest
+          registry-prefix: ${{ needs.prepare.outputs.registry_prefix }}

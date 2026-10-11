@@ -3,12 +3,16 @@ from __future__ import annotations
 import pytest
 
 from wificam_bridge.camera import (
+    DEFAULT_FRAME_TIMEOUT_SECONDS,
     G711_ALAW_FORMAT,
+    TIME_SYNC_COMMAND,
     CameraClient,
+    CameraError,
     CameraCredentials,
     MJPEGReassembler,
     VIDEO_MAX_QOS,
     build_lan_auth_request,
+    build_time_request_payload,
     build_time_sync_response,
     decrypt_rpc_payload,
     encode_protobuf_varint,
@@ -90,6 +94,12 @@ def test_time_sync_response_copies_request_timestamp() -> None:
     ]
 
 
+def test_time_request_payload_includes_latest_av_sequence() -> None:
+    payload = build_time_request_payload(123456, ans_seq=789)
+
+    assert _varints(payload) == [(1, 123456), (4, 789)]
+
+
 def test_maximum_video_qos_request() -> None:
     assert _varints(encode_protobuf_varint(2, VIDEO_MAX_QOS)) == [(2, 30)]
 
@@ -147,5 +157,112 @@ def test_camera_client_times_out_stalled_stream() -> None:
     client._session_prefix = b"0123456789abcdef0123456789abcdef"
     client._receive = lambda _deadline: []  # type: ignore[method-assign]
 
-    with pytest.raises(TimeoutError, match="no complete frame"):
+    with pytest.raises(TimeoutError, match="no activity"):
         next(client.frames())
+
+
+def test_camera_client_default_timeout_keeps_video_recovery_short() -> None:
+    client = CameraClient(
+        "camera.invalid",
+        CameraCredentials(b"prefix", "user", "password"),
+    )
+
+    assert DEFAULT_FRAME_TIMEOUT_SECONDS == 2.0
+    assert client.frame_timeout == DEFAULT_FRAME_TIMEOUT_SECONDS
+
+
+def test_camera_client_sends_av_ack_heartbeat(monkeypatch) -> None:
+    client = CameraClient(
+        "camera.invalid",
+        CameraCredentials(b"prefix", "user", "password"),
+        frame_timeout=10.0,
+    )
+    client._socket = object()  # type: ignore[assignment]
+    client._session_prefix = b"0123456789abcdef0123456789abcdef"
+    audio_packet = AVPacket(
+        FixedHeader(6, 9, 0, False, 2),
+        False,
+        G711_ALAW_FORMAT,
+        0,
+        0,
+        42,
+        20,
+        0,
+        b"\x01\x00audio",
+    )
+    sent: list[tuple[int, int, bytes]] = []
+    receives = 0
+    clock = 0.0
+
+    def monotonic() -> float:
+        return clock
+
+    def receive(_deadline):
+        nonlocal receives, clock
+        receives += 1
+        if receives == 1:
+            clock = 0.1
+            return [audio_packet]
+        if receives == 2:
+            clock = 0.6
+            return []
+        raise CameraError("end of test stream")
+
+    monkeypatch.setattr("wificam_bridge.camera.time.monotonic", monotonic)
+    client._receive = receive  # type: ignore[method-assign]
+    client._send_request = (  # type: ignore[method-assign]
+        lambda sequence, command_id, payload: sent.append((sequence, command_id, payload))
+    )
+
+    with pytest.raises(CameraError, match="end of test stream"):
+        next(client.frames())
+
+    assert len(sent) == 1
+    assert sent[0][0] == 5
+    assert sent[0][1] == TIME_SYNC_COMMAND
+    assert _varints(sent[0][2])[1] == (4, 42)
+
+
+def test_camera_client_refreshes_video_session_while_audio_arrives(monkeypatch) -> None:
+    client = CameraClient(
+        "camera.invalid",
+        CameraCredentials(b"prefix", "user", "password"),
+        frame_timeout=10.0,
+    )
+    client._socket = object()  # type: ignore[assignment]
+    client._session_prefix = b"0123456789abcdef0123456789abcdef"
+    audio_packet = AVPacket(
+        FixedHeader(6, 9, 0, False, 2),
+        False,
+        G711_ALAW_FORMAT,
+        0,
+        0,
+        10,
+        20,
+        0,
+        b"\x01\x00audio",
+    )
+    audio: list[bytes] = []
+    receives = 0
+    clock = 0.0
+
+    def monotonic() -> float:
+        return clock
+
+    def receive(_deadline):
+        nonlocal receives, clock
+        receives += 1
+        if receives <= 2:
+            clock = receives / 10
+            return [audio_packet]
+        clock = 10.1
+        return []
+
+    monkeypatch.setattr("wificam_bridge.camera.time.monotonic", monotonic)
+    client._receive = receive  # type: ignore[method-assign]
+    client._send_request = lambda *_args: None  # type: ignore[method-assign]
+
+    with pytest.raises(TimeoutError, match="no complete frame"):
+        next(client.frames(audio_callback=audio.append))
+
+    assert audio == [b"audio"] * 2
