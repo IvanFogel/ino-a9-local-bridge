@@ -80,12 +80,13 @@ async def test_config_entry_setup_creates_camera_and_control_entities(
         for entity in registry.entities.values()
         if entity.config_entry_id == entry.entry_id
     ]
-    assert len(entities) == 8
+    assert len(entities) == 9
     assert {entity.domain for entity in entities} == {
         "camera",
         "switch",
         "select",
         "button",
+        "sensor",
     }
     assert hass.services.has_service(DOMAIN, "set_intrusion_schedule")
 
