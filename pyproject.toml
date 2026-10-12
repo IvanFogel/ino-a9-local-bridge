@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ino-a9-local-bridge"
-version = "0.4.2"
+version = "0.4.3"
 description = "Local-only PPRPC research and bridge tooling for INO A9 cameras"
 readme = "README.md"
 requires-python = ">=3.11"

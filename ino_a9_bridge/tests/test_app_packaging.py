@@ -12,7 +12,7 @@ def test_app_manifest_publishes_rtsp_only() -> None:
     config = yaml.safe_load((APP_DIR / "config.yaml").read_text(encoding="utf-8"))
 
     assert config["name"] == "INO-A9 Local Bridge"
-    assert config["version"] == "0.4.2"
+    assert config["version"] == "0.4.3"
     assert config["slug"] == "ino_a9_bridge"
     assert "image" not in config
     assert config["url"].endswith("/tree/main/ino_a9_bridge")

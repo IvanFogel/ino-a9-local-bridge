@@ -41,6 +41,17 @@ this is the only host port published by the app. The custom integration
 discovers the app through Supervisor and consumes the private discovery token
 when it calls this API.
 
+With the app's Watchdog enabled, Supervisor checks the bridge's internal
+`/health` endpoint and can restart the app if HTTP stops responding, even while
+the container and RTSP listener remain running. An offline camera does not make
+this endpoint fail, so one disconnected camera does not restart healthy feeds.
+
+Media responses close after 15 seconds without new video or audio, letting
+go2rtc reconnect without retaining an idle HTTP request thread indefinitely.
+HTTP reads and writes also have a 15-second socket timeout to release stalled
+clients. A reconnect can briefly interrupt that stream; camera options and
+saved control state are preserved.
+
 The PPRPC reader sends an encrypted command-107 keepalive every 500 ms. Once an
 AV packet has arrived, the request includes protobuf field 4 with the latest AV
 sequence, acknowledging media consumed by the bridge and allowing the camera to

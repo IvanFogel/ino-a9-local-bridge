@@ -7,6 +7,10 @@ import json
 from pathlib import Path
 import threading
 
+import pytest
+
+from wificam_bridge import bridge
+
 from wificam_bridge.bridge import (
     BridgeHandler,
     BridgeHTTPServer,
@@ -160,4 +164,78 @@ def test_bridge_server_exposes_authenticated_control_api_without_affecting_media
     finally:
         server.shutdown()
         thread.join()
+        server.server_close()
+
+
+@pytest.mark.parametrize("endpoint", ["stream.mjpeg", "preview.mjpeg", "audio.alaw"])
+def test_media_timeout_closes_response_and_releases_request_thread(
+    endpoint, monkeypatch
+):
+    """An offline camera must not retain a handler for every reconnecting reader."""
+    # Shorten the state's real condition wait, including on the previous server.
+    # This test must fail for retained handlers, not for a missing new constant.
+    wait_frame = CameraState.wait_for_frame
+    wait_audio = CameraState.wait_for_audio
+    monkeypatch.setattr(
+        CameraState,
+        "wait_for_frame",
+        lambda self, after, timeout: wait_frame(self, after, 0.05),
+    )
+    monkeypatch.setattr(
+        CameraState,
+        "wait_for_audio",
+        lambda self, after, timeout: wait_audio(self, after, 0.05),
+    )
+    server = BridgeHTTPServer(("127.0.0.1", 0), {"offline": CameraState()})
+    finished = threading.Event()
+    process = server.process_request_thread
+
+    def tracked_request(*args):
+        try:
+            process(*args)
+        finally:
+            finished.set()
+
+    server.process_request_thread = tracked_request
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=1)
+    try:
+        connection.request("GET", f"/offline/{endpoint}")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.read() == b""
+        assert finished.wait(1), "offline media request retained its thread"
+    finally:
+        connection.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_video_stream_delivers_multiple_frames_before_idle_timeout(monkeypatch):
+    monkeypatch.setattr(bridge, "MEDIA_IDLE_TIMEOUT_SECONDS", 0.5)
+    state = CameraState()
+    state.publish(b"first-frame")
+    server = BridgeHTTPServer(("127.0.0.1", 0), {"front": state})
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=1)
+    try:
+        connection.request("GET", "/front/stream.mjpeg")
+        response = connection.getresponse()
+        assert response.status == 200
+        # Consume the first complete multipart part before publishing the next.
+        assert response.readline().startswith(b"--ino-a9-frame")
+        assert response.readline() == b"Content-Type: image/jpeg\r\n"
+        assert response.readline() == b"Content-Length: 11\r\n"
+        assert response.readline() == b"\r\n"
+        assert response.read(13) == b"first-frame\r\n"
+        state.publish(b"second-frame")
+        remainder = response.read()
+        assert b"second-frame\r\n" in remainder
+    finally:
+        connection.close()
+        server.shutdown()
+        thread.join(timeout=2)
         server.server_close()
