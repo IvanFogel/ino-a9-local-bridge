@@ -27,6 +27,8 @@ SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 PREVIEW_INTERVAL_SECONDS = 1.0
 RECONNECT_DELAY_SECONDS = 1.0
 RECENT_ACTIVITY_GRACE_SECONDS = 15.0
+MEDIA_IDLE_TIMEOUT_SECONDS = 15.0
+HTTP_IO_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +281,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
     server: BridgeHTTPServer
     protocol_version = "HTTP/1.1"
     server_version = "INOA9Bridge/0.1"
+    # Bound stalled header/body reads, keep-alive clients and blocked media writes.
+    timeout = HTTP_IO_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
         path = urlsplit(self.path).path
@@ -366,9 +370,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
         next_frame_at = 0.0
         try:
             while True:
-                value = state.wait_for_frame(frame_id, 15.0)
+                value = state.wait_for_frame(frame_id, MEDIA_IDLE_TIMEOUT_SECONDS)
                 if value is None:
-                    continue
+                    return
                 frame_id, frame = value
                 if minimum_interval:
                     now = time.monotonic()
@@ -396,9 +400,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
         audio_id = state.audio_cursor()
         try:
             while True:
-                chunks = state.wait_for_audio(audio_id, 15.0)
+                chunks = state.wait_for_audio(audio_id, MEDIA_IDLE_TIMEOUT_SECONDS)
                 if chunks is None:
-                    continue
+                    return
                 for audio_id, chunk in chunks:
                     self.wfile.write(chunk)
                 self.wfile.flush()
